@@ -1,5 +1,22 @@
 ![sm64coopdx Logo](textures/segment2/custom_coopdx_logo.rgba32.png)
 
+# sm64coopdx for the PlayStation Vita
+
+This fork ports [sm64coopdx](https://github.com/coop-deluxe/sm64coopdx) to the PS Vita.
+
+**It is experimental.** It has been run on a real Vita: it boots, renders, plays sound and loads
+mods. 30 FPS holds in large levels, 60 FPS only in smaller scenes. Direct connection netplay is
+implemented but untested, and CoopNet (public lobbies) is not available yet.
+
+* **Install, controls, known problems and build instructions: [README_vita.md](README_vita.md)**
+* You need a hacked Vita with `libshacccg.suprx` installed and your own US Super Mario 64 ROM.
+  No ROM or game assets are included in this repository.
+* Build with VitaSDK: `make TARGET_VITA=1` produces `build/us_vita/sm64coopdx.vpk`.
+
+Everything below is the README of the upstream project.
+
+---
+
 sm64coopdx is an online multiplayer project for the Super Mario 64 PC port that synchronizes all entities and every level for multiple players. The project was started by the Coop Deluxe Team. The purpose is to actively maintain and improve, but also continue sm64ex-coop, created by djoslin0. More features, customization, and power to the Lua API allow modders and players to enjoy Super Mario 64 more than ever!
 
 Feel free to report bugs or contribute to the project.
