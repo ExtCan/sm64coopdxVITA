@@ -1032,6 +1032,73 @@ ALSeqFile *get_audio_file_header(s32 index) {
 }
 #endif
 
+#if defined(TARGET_VITA)
+// PS Vita version of patch_audio_bank(), see AUDIO_FILE_PTR in internal.h.
+//
+// The bank data has the 64-bit file layout:
+//     u64 drumsOffset;                          -> u64 drumOffsets[numDrums]
+//     u64 instrumentOffsets[numInstruments];
+// Instruments, drums and samples keep that layout through AUDIO_FILE_PTR. The two offset tables
+// however are accessed as plain pointer arrays all over the audio code (drums[i], instruments[i]),
+// so they are converted in place into arrays of 32-bit pointers here. Writing entry i (4 bytes at
+// 4*i) only ever overwrites slots of entries <= i that were already read, so this is safe.
+static void patch_audio_bank_sound(struct AudioBankSound *sound, u8 *mem, u8 *offset) {
+    if (sound->sample == NULL) { return; }
+
+    struct AudioBankSample *sample = (struct AudioBankSample *)(mem + (uintptr_t) sound->sample);
+    sound->sample = sample;
+    if (sample->loaded == 0) {
+        sample->sampleAddr = offset + (uintptr_t) sample->sampleAddr;
+        sample->loop = (struct AdpcmLoop *)(mem + (uintptr_t) sample->loop);
+        sample->book = (struct AdpcmBook *)(mem + (uintptr_t) sample->book);
+        sample->loaded = 1;
+    }
+}
+
+void patch_audio_bank(struct AudioBank *mem, u8 *offset, u32 numInstruments, u32 numDrums) {
+    u8 *base = (u8 *) mem;
+
+    // drums
+    uintptr_t drumsOffset = (uintptr_t) mem->drums;
+    if (drumsOffset != 0 && numDrums > 0) {
+        u64 *fileDrums = (u64 *)(base + drumsOffset);
+        struct Drum **drums = (struct Drum **) fileDrums;
+        for (u32 i = 0; i < numDrums; i++) {
+            uintptr_t drumOffset = (uintptr_t) fileDrums[i];
+            struct Drum *drum = NULL;
+            if (drumOffset != 0) {
+                drum = (struct Drum *)(base + drumOffset);
+                if (drum->loaded == 0) {
+                    patch_audio_bank_sound(&drum->sound, base, offset);
+                    drum->envelope = (struct AdsrEnvelope *)(base + (uintptr_t) drum->envelope);
+                    drum->loaded = 1;
+                }
+            }
+            drums[i] = drum;
+        }
+        mem->drums = drums;
+    }
+
+    // instruments
+    u64 *fileInstruments = (u64 *) mem->instruments;
+    for (u32 i = 0; i < numInstruments; i++) {
+        uintptr_t instrumentOffset = (uintptr_t) fileInstruments[i];
+        struct Instrument *instrument = NULL;
+        if (instrumentOffset != 0) {
+            instrument = (struct Instrument *)(base + instrumentOffset);
+            if (instrument->loaded == 0) {
+                patch_audio_bank_sound(&instrument->lowNotesSound, base, offset);
+                patch_audio_bank_sound(&instrument->normalNotesSound, base, offset);
+                patch_audio_bank_sound(&instrument->highNotesSound, base, offset);
+                instrument->envelope = (struct AdsrEnvelope *)(base + (uintptr_t) instrument->envelope);
+                instrument->loaded = 1;
+            }
+        }
+        mem->instruments[i] = instrument;
+    }
+}
+#else // !TARGET_VITA
+
 // on US/JP this inlines patch_sound, using some -sopt compiler flag
 #if defined(VERSION_SH)
 void patch_audio_bank(s32 bankId, struct AudioBank *mem, struct PatchStruct *patchInfo) {
@@ -1208,6 +1275,7 @@ l2:
 #undef BASE_OFFSET
 #undef PATCH_SOUND
 }
+#endif // !TARGET_VITA
 
 #if defined(VERSION_SH)
 void func_sh_802f3ed4(UNUSED s32 arg0, UNUSED s32 arg1, UNUSED void *vAddr, UNUSED size_t nbytes);

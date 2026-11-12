@@ -27,9 +27,17 @@
 #include "pc/djui/djui_panel_pause.h"
 #include "pc/djui/djui_hud_utils.h"
 
+#ifdef TARGET_VITA
+#include <psp2/touch.h>
+#endif
+
 #define MAX_JOYBINDS 32
 #define MAX_MOUSEBUTTONS 8 // arbitrary
+#ifdef TARGET_VITA
+#define MAX_JOYBUTTONS 48  // the touch corners come after the regular buttons and triggers
+#else
 #define MAX_JOYBUTTONS 32  // arbitrary; includes virtual keys for triggers
+#endif
 #define AXIS_THRESHOLD (30 * 256)
 
 static bool init_ok = false;
@@ -204,6 +212,63 @@ static inline void update_analog_stick(s8 *stick_x, s8 *stick_y,
     }
 }
 
+#ifdef TARGET_VITA
+// How much of the panel a corner covers. On the front screen the corners are kept fairly small
+// so that the middle stays free for the menu pointer. The rear pad can't be seen while playing,
+// so it is simply split into four quadrants, with a small dead band between them.
+#define VITA_FRONT_CORNER_WIDTH  0.25f
+#define VITA_FRONT_CORNER_HEIGHT 0.34f
+#define VITA_REAR_DEAD_BAND      0.04f
+
+static void controller_vita_read_touch(void) {
+    static bool sTouchInit = false;
+    static SceTouchPanelInfo sPanelInfo[SCE_TOUCH_PORT_MAX_NUM];
+    if (!sTouchInit) {
+        for (int port = 0; port < SCE_TOUCH_PORT_MAX_NUM; port++) {
+            sceTouchSetSamplingState(port, SCE_TOUCH_SAMPLING_STATE_START);
+            memset(&sPanelInfo[port], 0, sizeof(SceTouchPanelInfo));
+            if (sceTouchGetPanelInfo(port, &sPanelInfo[port]) < 0 || sPanelInfo[port].maxAaX <= sPanelInfo[port].minAaX || sPanelInfo[port].maxAaY <= sPanelInfo[port].minAaY) {
+                // documented defaults: 1920x1088 on the front, the rear pad is a little shorter
+                sPanelInfo[port].minAaX = 0;
+                sPanelInfo[port].maxAaX = 1919;
+                sPanelInfo[port].minAaY = (port == SCE_TOUCH_PORT_BACK) ? 108 : 0;
+                sPanelInfo[port].maxAaY = (port == SCE_TOUCH_PORT_BACK) ? 889 : 1087;
+            }
+        }
+        sTouchInit = true;
+    }
+
+    bool pressed[VITA_TOUCH_BUTTON_COUNT] = { false };
+
+    for (int port = 0; port < SCE_TOUCH_PORT_MAX_NUM; port++) {
+        SceTouchData touch;
+        memset(&touch, 0, sizeof(touch));
+        if (sceTouchPeek(port, &touch, 1) < 1) { continue; }
+
+        const SceTouchPanelInfo *info = &sPanelInfo[port];
+        for (u32 i = 0; i < touch.reportNum && i < SCE_TOUCH_MAX_REPORT; i++) {
+            // position on the panel, 0..1 from the top left corner as seen from the front
+            f32 x = (f32)(touch.report[i].x - info->minAaX) / (f32)(info->maxAaX - info->minAaX);
+            f32 y = (f32)(touch.report[i].y - info->minAaY) / (f32)(info->maxAaY - info->minAaY);
+
+            f32 cornerWidth  = (port == SCE_TOUCH_PORT_FRONT) ? VITA_FRONT_CORNER_WIDTH  : (0.5f - VITA_REAR_DEAD_BAND);
+            f32 cornerHeight = (port == SCE_TOUCH_PORT_FRONT) ? VITA_FRONT_CORNER_HEIGHT : (0.5f - VITA_REAR_DEAD_BAND);
+
+            int column = (x < cornerWidth)  ? 0 : ((x > 1.0f - cornerWidth)  ? 1 : -1);
+            int row    = (y < cornerHeight) ? 0 : ((y > 1.0f - cornerHeight) ? 1 : -1);
+            if (column < 0 || row < 0) { continue; }
+
+            int base = (port == SCE_TOUCH_PORT_FRONT) ? VITA_TOUCH_FRONT_TOP_LEFT : VITA_TOUCH_REAR_TOP_LEFT;
+            pressed[base + row * 2 + column] = true;
+        }
+    }
+
+    for (int i = 0; i < VITA_TOUCH_BUTTON_COUNT; i++) {
+        update_button(VITA_TOUCH_BUTTON_BASE + i, pressed[i]);
+    }
+}
+#endif
+
 extern s16 gMenuMode;
 static void controller_sdl_read(OSContPad *pad) {
     if (!init_ok) { return; }
@@ -318,6 +383,10 @@ static void controller_sdl_read(OSContPad *pad) {
 
     update_button(VK_LTRIGGER - VK_BASE_SDL_GAMEPAD, ltrig > AXIS_THRESHOLD);
     update_button(VK_RTRIGGER - VK_BASE_SDL_GAMEPAD, rtrig > AXIS_THRESHOLD);
+
+#ifdef TARGET_VITA
+    controller_vita_read_touch();
+#endif
 
     for (u32 i = 0; i < num_joy_binds; ++i)
         if (joy_buttons[joy_binds[i][0]])

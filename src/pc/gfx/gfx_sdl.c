@@ -19,7 +19,10 @@
 #else
 #define GL_GLEXT_PROTOTYPES 1
 
-#ifdef OSX_BUILD
+#if defined(TARGET_VITA)
+#include <vitaGL.h>
+#include "pc/vita/vita_platform.h"
+#elif defined(OSX_BUILD)
 #include <SDL2/SDL_opengl.h>
 #else
 #include <SDL2/SDL_opengles2.h>
@@ -72,6 +75,11 @@ static inline void gfx_sdl_set_vsync(const bool enabled) {
 }
 
 static void gfx_sdl_set_fullscreen(void) {
+#ifdef TARGET_VITA
+    // the Vita's screen is the window
+    configWindow.fullscreen = true;
+    return;
+#endif
     if (configWindow.reset)
         configWindow.fullscreen = false;
     if (configWindow.fullscreen == IS_FULLSCREEN())
@@ -86,6 +94,14 @@ static void gfx_sdl_set_fullscreen(void) {
 }
 
 static void gfx_sdl_reset_dimension_and_pos(void) {
+#ifdef TARGET_VITA
+    configWindow.reset = false;
+    configWindow.exiting_fullscreen = false;
+    configWindow.w = VITA_SCREEN_WIDTH;
+    configWindow.h = VITA_SCREEN_HEIGHT;
+    gfx_sdl_set_vsync(configWindow.vsync);
+    return;
+#endif
     if (configWindow.exiting_fullscreen) {
         configWindow.exiting_fullscreen = false;
         SDL_ShowCursor(0);
@@ -115,9 +131,32 @@ static void gfx_sdl_init(const char *window_title) {
     SetProcessDPIAware();
 #endif
 
+#ifdef TARGET_VITA
+    // the rear touch pad would otherwise act as a second mouse
+    SDL_setenv("VITA_DISABLE_TOUCH_BACK", "1", 1);
+    // the front touch screen drives the DJUI cursor
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
+    SDL_Init(SDL_INIT_VIDEO);
+    // no SDL_StartTextInput() here: on the Vita that pops up the on screen keyboard,
+    // it is opened on demand when an input box gets focused instead
+
+    // vitaGL gets initialized by SDL when the window is created, configure it first
+    vita_gl_pre_init();
+
+    configWindow.x = 0;
+    configWindow.y = 0;
+    configWindow.w = VITA_SCREEN_WIDTH;
+    configWindow.h = VITA_SCREEN_HEIGHT;
+    configWindow.fullscreen = true;
+    // GXM only does 2x and 4x multisampling
+    if (configWindow.msaa >= 4) { configWindow.msaa = 4; }
+    else if (configWindow.msaa >= 2) { configWindow.msaa = 2; }
+    else { configWindow.msaa = 0; }
+#else
     SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
     SDL_Init(SDL_INIT_VIDEO);
     SDL_StartTextInput();
+#endif
 
     if (configWindow.msaa > 0) {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
@@ -145,6 +184,13 @@ static void gfx_sdl_init(const char *window_title) {
     );
     ctx = SDL_GL_CreateContext(wnd);
 
+#ifdef TARGET_VITA
+    if (!wnd || !ctx) {
+        vita_fatal("Could not initialize the display (vitaGL).\nIs libshacccg.suprx installed in ur0:data/ ?");
+    }
+    vita_gl_post_init();
+#endif
+
     gfx_sdl_set_vsync(configWindow.vsync);
 
     gfx_sdl_set_fullscreen();
@@ -156,6 +202,9 @@ static void gfx_sdl_init(const char *window_title) {
 }
 
 bool gfx_sdl_check_opengl_compatibility(void) {
+#ifdef TARGET_VITA
+    return true;
+#else
     if (!(SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO)) {
         if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
             return false;
@@ -187,6 +236,7 @@ bool gfx_sdl_check_opengl_compatibility(void) {
     SDL_DestroyWindow(window);
 
     return validVersion;
+#endif
 }
 
 static void gfx_sdl_main_loop(void (*run_one_game_iter)(void)) {
@@ -243,6 +293,9 @@ static void gfx_sdl_ondropfile(char* path) {
 }
 
 static void gfx_sdl_handle_events(void) {
+#ifdef TARGET_VITA
+    vita_update();
+#endif
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -252,12 +305,23 @@ static void gfx_sdl_handle_events(void) {
             case SDL_TEXTEDITING: //IME composition
                 kb_text_editing(event.edit.text,event.edit.start);
                 break;
+#ifdef TARGET_VITA
+            // SDL for the Vita is built with short enums (a 2 byte SDL_Scancode), we are not:
+            // only the low bytes of the field are valid
+            case SDL_KEYDOWN:
+                gfx_sdl_onkeydown(((int)event.key.keysym.scancode) & 0x1FF);
+                break;
+            case SDL_KEYUP:
+                gfx_sdl_onkeyup(((int)event.key.keysym.scancode) & 0x1FF);
+                break;
+#else
             case SDL_KEYDOWN:
                 gfx_sdl_onkeydown(event.key.keysym.scancode);
                 break;
             case SDL_KEYUP:
                 gfx_sdl_onkeyup(event.key.keysym.scancode);
                 break;
+#endif
             case SDL_MOUSEWHEEL:
                 gfx_sdl_onscroll(event.wheel.preciseX, event.wheel.preciseY);
                 break;
@@ -327,6 +391,9 @@ static void gfx_sdl_delay(u32 ms) {
 }
 
 static int gfx_sdl_get_max_msaa(void) {
+#ifdef TARGET_VITA
+    return 4;
+#endif
     int maxSamples = 0;
     glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
     if (maxSamples > 16) { maxSamples = 16; }
@@ -350,6 +417,9 @@ static void gfx_sdl_shutdown(void) {
 }
 
 static bool gfx_sdl_has_focus(void) {
+#ifdef TARGET_VITA
+    return true;
+#endif
     return (SDL_GetWindowFlags(wnd) & SDL_WINDOW_INPUT_FOCUS);
 }
 

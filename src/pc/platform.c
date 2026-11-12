@@ -292,6 +292,34 @@ static void sys_fatal_impl(const char *msg) {
     exit(1);
 }
 
+#elif defined(TARGET_VITA)
+
+// PS Vita: the VPK contents are mounted read-only at app0:, user data lives on the memory card.
+// See src/pc/vita/vita_platform.c
+#include "vita/vita_platform.h"
+
+const char *sys_user_path(void) {
+    return vita_user_path();
+}
+
+const char *sys_resource_path(void) {
+    return VITA_RESOURCE_PATH;
+}
+
+const char *sys_exe_path_dir(void) {
+    return VITA_RESOURCE_PATH;
+}
+
+const char *sys_exe_path_file(void) {
+    return VITA_RESOURCE_PATH "/eboot.bin";
+}
+
+static void sys_fatal_impl(const char *msg) {
+    fprintf(stderr, "FATAL ERROR:\n%s\n", msg);
+    fflush(stderr);
+    vita_fatal(msg);
+}
+
 #else
 
 #include <SDL2/SDL.h>

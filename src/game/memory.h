@@ -8,7 +8,13 @@
 #define MEMORY_POOL_LEFT  0
 #define MEMORY_POOL_RIGHT 1
 
+#ifdef TARGET_VITA
+// This is a count of 8 byte display list commands: 0x400000 would pin 32 MiB of the Vita's
+// fixed memory budget, 0x100000 (8 MiB) is still 16 times what the vanilla game has.
+#define GFX_POOL_SIZE      0x100000
+#else
 #define GFX_POOL_SIZE      0x400000 //  4MB (Vanilla: 512kB)
+#endif
 #define DEFAULT_POOL_SIZE 0x2000000 // 32MB (Vanilla: ~11MB)
 
 struct DynamicPool

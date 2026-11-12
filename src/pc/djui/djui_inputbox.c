@@ -341,6 +341,11 @@ void djui_inputbox_on_focus_begin(UNUSED struct DjuiBase* base) {
     gDjuiInputHeldShift   = 0;
     gDjuiInputHeldControl = 0;
     gDjuiInputHeldAlt     = 0;
+#ifdef TARGET_VITA
+    // The system's on screen keyboard hands over a complete line of text and there is no
+    // backspace key: select everything, so that the entered text replaces the old content.
+    djui_inputbox_select_all((struct DjuiInputbox *) base);
+#endif
     gWindowApi->start_text_input();
 }
 

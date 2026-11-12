@@ -113,6 +113,36 @@ const char* translate_bind_to_name(int bind) {
     // gamepad
     if (bind >= VK_BASE_SDL_GAMEPAD) {
         int gamepad_button = (bind - VK_BASE_SDL_GAMEPAD);
+#ifdef TARGET_VITA
+        // the Vita's own button names, and the touch corners
+        switch (gamepad_button) {
+            case 0: return "Cross";
+            case 1: return "Circle";
+            case 2: return "Square";
+            case 3: return "Triangle";
+            case 4: return "Select";
+            case 6: return "Start";
+            case 7: return "L3";
+            case 8: return "R3";
+            case 9: return "L";
+            case 10: return "R";
+            case 11: return "D-Up";
+            case 12: return "D-Down";
+            case 13: return "D-Left";
+            case 14: return "D-Right";
+            case 0x1A: return "L2";
+            case 0x1B: return "R2";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_FRONT_TOP_LEFT:     return "Front TL";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_FRONT_TOP_RIGHT:    return "Front TR";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_FRONT_BOTTOM_LEFT:  return "Front BL";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_FRONT_BOTTOM_RIGHT: return "Front BR";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_REAR_TOP_LEFT:      return "Rear TL";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_REAR_TOP_RIGHT:     return "Rear TR";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_REAR_BOTTOM_LEFT:   return "Rear BL";
+            case VITA_TOUCH_BUTTON_BASE + VITA_TOUCH_REAR_BOTTOM_RIGHT:  return "Rear BR";
+            default: return name;
+        }
+#endif
         switch (gamepad_button) {
             case 0: return "[A]";
             case 1: return "[B]";

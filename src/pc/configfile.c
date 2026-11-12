@@ -86,8 +86,15 @@ enum GraphicsBackend configGraphicsBackend        = GAPI_GL;
 unsigned int configFiltering                      = 2; // 0 = Nearest, 1 = Bilinear, 2 = Trilinear
 bool         configShowFPS                        = false;
 bool         configShowPing                       = false;
+#ifdef TARGET_VITA
+// rendering interpolated frames costs a full extra pass over the display list on the CPU,
+// start out at the game's native 30 FPS (can be raised in the display options)
+enum RefreshRateMode configFramerateMode          = RRM_MANUAL;
+unsigned int configFrameLimit                     = 30;
+#else
 enum RefreshRateMode configFramerateMode          = RRM_AUTO;
 unsigned int configFrameLimit                     = 60;
+#endif
 unsigned int configInterpolationMode              = 1;
 unsigned int configDrawDistance                   = 6;
 // sound settings
@@ -126,6 +133,18 @@ static const unsigned int defaultConfigKeyPrevPage[MAX_BINDS]   = { 0x0016,     
 static const unsigned int defaultConfigKeyNextPage[MAX_BINDS]   = { 0x0018,     VK_INVALID, VK_INVALID };
 static const unsigned int defaultConfigKeyDisconnect[MAX_BINDS] = { 0x0058,     VK_INVALID, VK_INVALID };
 
+#ifdef TARGET_VITA
+// Vita layout: Cross = A, Square = B, Circle = X, Triangle = Y, L = Z, R = R, Select = player list
+// (0x1000 + SDL_GameControllerButton; the L2/R2 triggers only exist on a PS TV with a DualShock)
+unsigned int configKeyA[MAX_BINDS]                = { 0x0026,     0x1000,     VK_INVALID };
+unsigned int configKeyB[MAX_BINDS]                = { 0x0033,     0x1002,     VK_INVALID };
+unsigned int configKeyX[MAX_BINDS]                = { 0x0017,     0x1001,     VK_INVALID };
+unsigned int configKeyY[MAX_BINDS]                = { 0x0032,     0x1003,     VK_INVALID };
+unsigned int configKeyStart[MAX_BINDS]            = { 0x0039,     0x1006,     VK_INVALID };
+unsigned int configKeyL[MAX_BINDS]                = { 0x002A,     0x1007,     VK_INVALID };
+unsigned int configKeyR[MAX_BINDS]                = { 0x0036,     0x100A,     0x101B     };
+unsigned int configKeyZ[MAX_BINDS]                = { 0x0025,     0x1009,     0x101A     };
+#else
 unsigned int configKeyA[MAX_BINDS]                = { 0x0026,     0x1000,     0x1103     };
 unsigned int configKeyB[MAX_BINDS]                = { 0x0033,     0x1001,     0x1101     };
 unsigned int configKeyX[MAX_BINDS]                = { 0x0017,     0x1002,     VK_INVALID };
@@ -134,6 +153,7 @@ unsigned int configKeyStart[MAX_BINDS]            = { 0x0039,     0x1006,     VK
 unsigned int configKeyL[MAX_BINDS]                = { 0x002A,     0x1009,     0x1104     };
 unsigned int configKeyR[MAX_BINDS]                = { 0x0036,     0x100A,     0x101B     };
 unsigned int configKeyZ[MAX_BINDS]                = { 0x0025,     0x1007,     0x101A     };
+#endif
 unsigned int configKeyCUp[MAX_BINDS]              = { 0x0148,     VK_INVALID, VK_INVALID };
 unsigned int configKeyCDown[MAX_BINDS]            = { 0x0150,     VK_INVALID, VK_INVALID };
 unsigned int configKeyCLeft[MAX_BINDS]            = { 0x014B,     VK_INVALID, VK_INVALID };
@@ -256,11 +276,11 @@ static const struct ConfigOption options[] = {
     {.name = "vsync",                          .type = CONFIG_TYPE_BOOL, .boolValue = &configWindow.vsync},
     {.name = "msaa",                           .type = CONFIG_TYPE_UINT, .uintValue = &configWindow.msaa},
     // display settings
-    {.name = "graphics_backend",               .type = CONFIG_TYPE_UINT, .uintValue = &configGraphicsBackend},
+    {.name = "graphics_backend",               .type = CONFIG_TYPE_UINT, .uintValue = (unsigned int *)&configGraphicsBackend},
     {.name = "texture_filtering",              .type = CONFIG_TYPE_UINT, .uintValue = &configFiltering},
     {.name = "show_fps",                       .type = CONFIG_TYPE_BOOL, .boolValue = &configShowFPS},
     {.name = "show_ping",                      .type = CONFIG_TYPE_BOOL, .boolValue = &configShowPing},
-    {.name = "framerate_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = &configFramerateMode},
+    {.name = "framerate_mode",                 .type = CONFIG_TYPE_UINT, .uintValue = (unsigned int *)&configFramerateMode},
     {.name = "frame_limit",                    .type = CONFIG_TYPE_UINT, .uintValue = &configFrameLimit},
     {.name = "interpolation_mode",             .type = CONFIG_TYPE_UINT, .uintValue = &configInterpolationMode},
     {.name = "coop_draw_distance",             .type = CONFIG_TYPE_UINT, .uintValue = &configDrawDistance},

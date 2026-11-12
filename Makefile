@@ -36,6 +36,9 @@ TARGET_RPI ?= 0
 # Build and optimize for RK3588 processor
 TARGET_RK3588 ?= 0
 
+# Build for the PlayStation Vita (requires VitaSDK, see README_vita.md)
+TARGET_VITA ?= 0
+
 # Makeflag to enable OSX fixes
 OSX_BUILD ?= 0
 
@@ -129,6 +132,30 @@ ifeq ($(HOST_OS),Linux)
     #Rasberry Pi zero, 2, 3, etc
     TARGET_RPI = 1
   endif
+endif
+
+# PS Vita is always cross compiled, no matter what the host is
+ifeq ($(TARGET_VITA),1)
+  ifeq ($(VITASDK),)
+    $(error VITASDK is not set. Install VitaSDK and export VITASDK=/path/to/vitasdk)
+  endif
+  WINDOWS_BUILD := 0
+  OSX_BUILD := 0
+  TARGET_RPI := 0
+  TARGET_RK3588 := 0
+  CROSS := arm-vita-eabi-
+  DISCORD_SDK := 0
+  ifneq ($(VITA_COOPNET),1)
+    COOPNET := 0
+  endif
+  UPDATER := 0
+  HANDHELD := 1
+  ICON := 0
+  USE_APP := 0
+  # MA_NO_DEVICE_IO: miniaudio has no Vita backend, mod audio is mixed into the game's stream instead
+  DEFINES += TARGET_VITA=1 BITS_32=1 MA_NO_DEVICE_IO=1 MA_NO_RUNTIME_LINKING=1
+  # newlib only exposes LLONG_MAX (which luaconf.h checks for) to C++ through <climits>
+  EXTRA_CPP_FLAGS += -include climits
 endif
 
 # MXE overrides
@@ -274,6 +301,14 @@ else
   PROF_FLAGS :=
 endif
 
+ifeq ($(TARGET_VITA),1)
+  $(info Compiling for PlayStation Vita)
+  # -fno-short-enums: arm-vita-eabi packs enums into a single byte by default. The game assumes
+  # enums are ints all over the place (config, Lua bindings, and above all network packets, which
+  # have to stay compatible with PC players), so use the same enum size as every other platform.
+  OPT_FLAGS += -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -fno-short-enums -ffunction-sections -fdata-sections
+endif
+
 ifeq ($(TARGET_RPI),1)
   $(info Compiling for Raspberry Pi)
   DISCORD_SDK := 0
@@ -412,7 +447,7 @@ TOOLS_DIR := tools
 # on tools and assets, and we use directory globs further down
 # in the makefile that we want should cover assets.)
 
-PYTHON := python3
+PYTHON ?= python3
 
 ifeq ($(filter clean distclean print-%,$(MAKECMDGOALS)),)
   ifeq ($(WINDOWS_AUTO_BUILDER),0)
@@ -440,7 +475,11 @@ _ := $(shell $(PYTHON) $(TOOLS_DIR)/copy_extended_sounds.py)
 
 BUILD_DIR_BASE := build
 # BUILD_DIR is the location where all build artifacts are placed
-BUILD_DIR := $(BUILD_DIR_BASE)/$(VERSION)_pc
+ifeq ($(TARGET_VITA),1)
+  BUILD_DIR := $(BUILD_DIR_BASE)/$(VERSION)_vita
+else
+  BUILD_DIR := $(BUILD_DIR_BASE)/$(VERSION)_pc
+endif
 
 ifeq ($(WINDOWS_BUILD),1)
 	EXE := $(BUILD_DIR)/sm64coopdx.exe
@@ -454,6 +493,10 @@ endif
 
 ifeq ($(TARGET_RK3588),1)
   EXE := $(BUILD_DIR)/sm64coopdx.arm
+endif
+
+ifeq ($(TARGET_VITA),1)
+  EXE := $(BUILD_DIR)/sm64coopdx.elf
 endif
 
 ELF            := $(BUILD_DIR)/$(TARGET).elf
@@ -519,6 +562,25 @@ ifeq ($(TARGET_N64),0)
 
 	C_FILES           := $(filter-out src/game/main.c,$(C_FILES))
 	ULTRA_C_FILES     := $(addprefix lib/src/,$(ULTRA_C_FILES))
+endif
+
+# PS Vita: swap the desktop-only backends for the Vita ones and build Lua from source
+ifeq ($(TARGET_VITA),1)
+  VITA_EXCLUDE_C := \
+    src/pc/gfx/gfx_opengl.c \
+    src/pc/network/socket/socket.c \
+    src/pc/network/socket/socket_linux.c \
+    src/pc/network/socket/socket_windows.c \
+    src/pc/mumble/mumble.c \
+    src/pc/update_checker.c
+  VITA_EXCLUDE_CPP := \
+    src/pc/gfx/gfx_direct3d11.cpp \
+    src/pc/gfx/gfx_direct3d_common.cpp \
+    src/pc/gfx/gfx_dxgi.cpp
+  C_FILES   := $(filter-out $(VITA_EXCLUDE_C),$(C_FILES)) $(wildcard src/pc/vita/*.c)
+  CPP_FILES := $(filter-out $(VITA_EXCLUDE_CPP),$(CPP_FILES)) $(wildcard src/pc/vita/*.cpp)
+  LUA_C_FILES := $(wildcard lib/lua/src/*.c)
+  C_FILES   += $(LUA_C_FILES)
 endif
 
 # Sound files
@@ -723,7 +785,10 @@ ifeq ($(WINDOWS_BUILD),1)
 endif
 
 # SDL2 Flags
-ifeq ($(WINDOWS_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  # vitaGL + the SDL2 build that uses it as its GL backend (vdpm install sdl2_vitagl zlib)
+  BACKEND_LDFLAGS += -lSDL2 -lvitaGL -lvitashark -lSceShaccCgExt -lSceShaccCg_stub -lmathneon -ltaihen_stub
+else ifeq ($(WINDOWS_BUILD),1)
   BACKEND_LDFLAGS += -lglew32 -lglu32 -lopengl32
 else ifeq ($(TARGET_RPI),1)
   BACKEND_LDFLAGS += -lGLESv2
@@ -741,7 +806,9 @@ endif
 SDLCONFIG := $(CROSS)sdl2-config
 BACKEND_CFLAGS += -DHAVE_SDL2=1
 
-ifeq ($(OSX_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  # headers live in $(VITASDK)/arm-vita-eabi/include/SDL2, which the toolchain already searches
+else ifeq ($(OSX_BUILD),1)
   # on OSX at least the homebrew version of sdl-config gives include path as `.../include/SDL2` instead of `.../include`
   OSX_PREFIX := $(shell $(SDLCONFIG) --prefix)
   BACKEND_CFLAGS += -I$(OSX_PREFIX)/include $(shell $(SDLCONFIG) --cflags)
@@ -749,7 +816,9 @@ else
   BACKEND_CFLAGS += `$(SDLCONFIG) --cflags`
 endif
 
-ifeq ($(WINDOWS_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  # nothing: libraries are listed explicitly above
+else ifeq ($(WINDOWS_BUILD),1)
   BACKEND_LDFLAGS += `$(SDLCONFIG) --static-libs` -lsetupapi -luser32 -limm32 -lole32 -loleaut32 -lshell32 -lshlwapi -lwinmm -lversion
 else
   BACKEND_LDFLAGS += `$(SDLCONFIG) --libs`
@@ -802,7 +871,17 @@ ifeq ($(TARGET_N64),1)
   endif
 endif
 
-ifeq ($(WINDOWS_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  VITA_STUBS := \
+    -lSceGxm_stub -lSceDisplay_stub -lSceCtrl_stub -lSceTouch_stub -lSceAudio_stub -lSceAudioIn_stub \
+    -lSceMotion_stub -lSceHid_stub -lSceIme_stub -lSceCommonDialog_stub -lSceSysmodule_stub \
+    -lSceAppMgr_stub -lSceAppUtil_stub -lScePower_stub -lSceKernelDmacMgr_stub -lSceKernelThreadMgr_stub \
+    -lSceNet_stub -lSceNetCtl_stub -lSceIofilemgr_stub -lSceLibKernel_stub -lSceRtc_stub
+  # --undefined: vita-elf-create looks these process parameters up by name, keep them from being
+  #              garbage collected. --wrap: see __wrap_pthread_attr_init in vita_platform.c
+  VITA_LINK_FIXUPS :=     -Wl,--undefined=sceUserMainThreadStackSize -Wl,--undefined=sceLibcHeapSize     -Wl,--wrap=pthread_attr_init
+  LDFLAGS := $(OPT_FLAGS) -Wl,-q -Wl,--gc-sections -Wl,--no-enum-size-warning $(VITA_LINK_FIXUPS) $(BACKEND_LDFLAGS) $(VITA_STUBS) -pthread -lm
+else ifeq ($(WINDOWS_BUILD),1)
   LDFLAGS := $(BITS) -march=$(TARGET_ARCH) -Llib -lpthread $(BACKEND_LDFLAGS) -static -mconsole
   ifeq ($(CROSS),)
     LDFLAGS += -no-pie
@@ -819,7 +898,7 @@ else
 endif
 
 # used by crash handler and loading screen on linux
-ifeq ($(WINDOWS_BUILD),0)
+ifeq ($(WINDOWS_BUILD)$(TARGET_VITA),00)
   LDFLAGS += -rdynamic -ldl -pthread
 endif
 
@@ -856,14 +935,18 @@ endif
 LDFLAGS += -lz
 
 # Update checker library
-ifeq ($(WINDOWS_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  # no update checker on Vita
+else ifeq ($(WINDOWS_BUILD),1)
   LDFLAGS += -lwininet
 else
   LDFLAGS += -lcurl
 endif
 
 # Lua
-ifeq ($(WINDOWS_BUILD),1)
+ifeq ($(TARGET_VITA),1)
+  # built from lib/lua/src as part of the game, nothing to link
+else ifeq ($(WINDOWS_BUILD),1)
   ifeq ($(TARGET_BITS), 32)
     LDFLAGS += -Llib/lua/win32 -l:liblua53.a
   else
@@ -962,12 +1045,14 @@ else
 endif
 
 # Enable ASLR
-CFLAGS += -fPIE
+ifeq ($(TARGET_VITA),0)
+  CFLAGS += -fPIE
+endif
 
 # Prevent a crash with -sopt
 export LANG := C
 
-ifeq ($(OSX_BUILD),0)
+ifeq ($(OSX_BUILD)$(TARGET_VITA),00)
   LDFLAGS += -latomic
 endif
 
@@ -1027,6 +1112,12 @@ endif
 ifeq ($(TARGET_RPI),1)
   CC_CHECK_CFLAGS += -DTARGET_RPI
   CFLAGS += -DTARGET_RPI
+endif
+
+# Check for vita option
+ifeq ($(TARGET_VITA),1)
+  CC_CHECK_CFLAGS += -DTARGET_VITA
+  CFLAGS += -DTARGET_VITA
 endif
 
 # Check for rk3588 option
@@ -1189,6 +1280,28 @@ endif
 
 $(CRASH_TEXTURE_C_FILES): TEXTURE_ENCODING := u32
 
+ifeq ($(TARGET_VITA),1)
+  # Lua is third party code: build it with its own headers and without our warning set
+  $(BUILD_DIR)/lib/lua/src/%.o: CC_CHECK_CFLAGS := -fsyntax-only -Ilib/lua/src -w
+  $(BUILD_DIR)/lib/lua/src/%.o: CFLAGS := $(OPT_FLAGS) -Ilib/lua/src -fno-strict-aliasing -w
+
+  # The Vita's CPU is the bottleneck: build the inner loops of the software T&L renderer,
+  # the audio synthesis and the math/collision code with -O3 (the rest stays at the default level)
+  VITA_HOT_OBJECTS := \
+    src/pc/gfx/gfx_pc.o src/pc/gfx/gfx_cc.o src/pc/vita/gfx_vitagl.o src/pc/mixer.o \
+    src/audio/synthesis.o src/audio/playback.o src/audio/seqplayer.o src/audio/effects.o \
+    src/engine/math_util.o src/engine/surface_collision.o src/engine/lighting_engine.o \
+    src/game/rendering_graph_node.o
+  $(addprefix $(BUILD_DIR)/,$(VITA_HOT_OBJECTS)): CFLAGS += -O3
+
+  # The software T&L code divides by constants all over the place (x / 255.0f, n / 127.0f) and
+  # float division is expensive on the Vita's Cortex-A9. Relaxed float rules let the compiler
+  # turn those into multiplications. This is limited to code that only produces pixels: nothing
+  # that feeds game logic or the network is built this way. NaN/infinity semantics are kept.
+  VITA_FASTMATH_OBJECTS := src/pc/gfx/gfx_pc.o src/pc/gfx/gfx_cc.o src/pc/vita/gfx_vitagl.o
+  $(addprefix $(BUILD_DIR)/,$(VITA_FASTMATH_OBJECTS)): CFLAGS += -ffast-math -fno-finite-math-only
+endif
+
 ifeq ($(COMPILER),gcc)
   $(BUILD_DIR)/lib/src/math/%.o: CFLAGS += -fno-builtin
 endif
@@ -1218,6 +1331,10 @@ else
     # non-EU encoded text inserted into segment 0x02
     $(BUILD_DIR)/bin/segment2.o: $(BUILD_DIR)/text/$(VERSION)/define_text.inc.c
   endif
+endif
+
+ifeq ($(TARGET_VITA),1)
+  SRC_DIRS += src/pc/vita lib/lua/src
 endif
 
 ALL_DIRS := $(BUILD_DIR) $(addprefix $(BUILD_DIR)/,$(SRC_DIRS) $(GODDARD_SRC_DIRS) $(ULTRA_SRC_DIRS) $(ULTRA_BIN_DIRS) $(BIN_DIRS) $(TEXTURE_DIRS) $(TEXT_DIRS) $(SOUND_SAMPLE_DIRS) $(addprefix levels/,$(LEVEL_DIRS)) rsp include) $(MIO0_DIR) $(addprefix $(MIO0_DIR)/,$(VERSION)) $(SOUND_BIN_DIR) $(SOUND_BIN_DIR)/sequences/$(VERSION)
@@ -1513,6 +1630,56 @@ else
   $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS) $(BUILD_DIR)/$(DISCORD_SDK_LIBS) $(BUILD_DIR)/$(COOPNET_LIBS) $(BUILD_DIR)/$(UPDATER_EXEC) $(BUILD_DIR)/$(LANG_DIR) $(BUILD_DIR)/$(MOD_DIR) $(BUILD_DIR)/$(PALETTES_DIR)
 	@$(PRINT) "$(GREEN)Linking executable: $(BLUE)$@ $(NO_COL)\n"
 	$(V)$(LD) $(PROF_FLAGS) -L $(BUILD_DIR) -o $@ $(O_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS)
+endif
+
+#==============================================================================#
+# PlayStation Vita packaging                                                   #
+#==============================================================================#
+
+ifeq ($(TARGET_VITA),1)
+  VITA_TITLEID  ?= SMCX00001
+  VITA_TITLE    ?= SM64 Coop DX
+  VITA_VERSION  ?= 01.00
+  VITA_VPK      := $(BUILD_DIR)/sm64coopdx.vpk
+  VITA_SCE_SYS  := $(BUILD_DIR)/sce_sys
+
+vpk: $(VITA_VPK)
+all: $(VITA_VPK)
+
+$(BUILD_DIR)/sm64coopdx.velf: $(EXE)
+	@$(PRINT) "$(GREEN)Creating VELF: $(BLUE)$@ $(NO_COL)\n"
+	$(V)$(CROSS)strip -g -o $(BUILD_DIR)/sm64coopdx.stripped.elf $<
+	$(V)vita-elf-create $(BUILD_DIR)/sm64coopdx.stripped.elf $@
+
+# No -s here: the eboot has to be an "unsafe" homebrew. A safe one has no access to ur0:,
+# which is where vitaGL loads the runtime shader compiler (libshacccg.suprx) from.
+$(BUILD_DIR)/eboot.bin: $(BUILD_DIR)/sm64coopdx.velf
+	@$(PRINT) "$(GREEN)Creating SELF: $(BLUE)$@ $(NO_COL)\n"
+	$(V)vita-make-fself -c $< $@
+
+# ATTRIBUTE2=12 asks for the largest user memory budget (the extra ~109 MiB)
+$(VITA_SCE_SYS)/param.sfo: Makefile
+	@mkdir -p $(VITA_SCE_SYS)
+	$(V)vita-mksfoex -s TITLE_ID=$(VITA_TITLEID) -s APP_VER=$(VITA_VERSION) -d ATTRIBUTE2=12 "$(VITA_TITLE)" $@
+
+VITA_ICON_SRC := res/icon.icon/Assets/icon.png
+VITA_LOGO_SRC := textures/segment2/custom_coopdx_logo.rgba32.png
+
+$(VITA_SCE_SYS)/icon0.png: $(VITA_ICON_SRC) $(VITA_LOGO_SRC) tools/vita/mklivearea.py
+	@$(PRINT) "$(GREEN)Generating LiveArea assets $(NO_COL)\n"
+	$(V)$(PYTHON) tools/vita/mklivearea.py $(VITA_ICON_SRC) $(VITA_LOGO_SRC) $(VITA_SCE_SYS)
+
+$(VITA_VPK): $(BUILD_DIR)/eboot.bin $(VITA_SCE_SYS)/param.sfo $(VITA_SCE_SYS)/icon0.png $(BUILD_DIR)/$(LANG_DIR) $(BUILD_DIR)/$(MOD_DIR) $(BUILD_DIR)/$(PALETTES_DIR)
+	@$(PRINT) "$(GREEN)Packing VPK: $(BLUE)$@ $(NO_COL)\n"
+	$(V)$(PYTHON) tools/vita/mkvpk.py $@ \
+	    $(BUILD_DIR)/eboot.bin=eboot.bin \
+	    $(VITA_SCE_SYS)=sce_sys \
+	    $(BUILD_DIR)/$(LANG_DIR)=lang \
+	    $(BUILD_DIR)/$(PALETTES_DIR)=palettes \
+	    $(BUILD_DIR)/$(MOD_DIR)=mods \
+	    $(BUILD_DIR)/dynos=dynos
+
+.PHONY: vpk
 endif
 
 .PHONY: all clean distclean default diff test load libultra res

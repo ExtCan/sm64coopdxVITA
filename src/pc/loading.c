@@ -187,9 +187,19 @@ void render_loading_screen(void) {
 void render_rom_setup_screen(void) {
     if (!sLoading) { init_loading_screen(); }
 
+#ifdef TARGET_VITA
+    loading_screen_set_segment_text("No rom detected!\nCopy Super Mario 64 (U) [!].z64 to\nux0:data/sm64coopdx/\nthen press any button to try again");
+
+    extern bool vita_rom_retry_requested(void);
+    while (!gRomIsValid) {
+        gWindowApi->main_loop(loading_screen_produce_one_frame);
+        if (vita_rom_retry_requested()) { main_rom_handler(); }
+    }
+#else
     loading_screen_set_segment_text("No rom detected, drag & drop Super Mario 64 (U) [!].z64 on to this screen");
 
     while (!gRomIsValid) {
         gWindowApi->main_loop(loading_screen_produce_one_frame);
     }
+#endif
 }

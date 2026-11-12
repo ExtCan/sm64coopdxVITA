@@ -41,6 +41,18 @@
 
 #define G_TX_LOADTILE_6_UNKNOWN 6
 
+#ifdef TARGET_VITA
+// statistics for the log, see vita_update()
+#include "pc/vita/vita_platform.h"
+#define GFX_PERF_SAMPLED(timeSection, code) VITA_PERF_SAMPLED(timeSection, code)
+#define GFX_PERF_COUNT(section, value) vita_perf_add(section, value)
+#define GFX_PERF(section, code) { unsigned long long _gfxPerfStart = vita_perf_now(); code; vita_perf_add(section, vita_perf_now() - _gfxPerfStart); }
+#else
+#define GFX_PERF_SAMPLED(timeSection, code) { code; }
+#define GFX_PERF_COUNT(section, value)
+#define GFX_PERF(section, code) { code; }
+#endif
+
 u8 gGfxPcResetTex1 = 0;
 
 static struct TextureCache gfx_texture_cache = { 0 };
@@ -1817,7 +1829,8 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
             // RSP commands:
             case G_MTX:
 #ifdef F3DEX_GBI_2
-                gfx_sp_matrix(C0(0, 8) ^ G_MTX_PUSH, (const int32_t *) seg_addr(cmd->words.w1));
+                GFX_PERF_COUNT(VITA_PERF_MTX_CALLS, 1);
+                GFX_PERF_SAMPLED(VITA_PERF_MTX_TIME, gfx_sp_matrix(C0(0, 8) ^ G_MTX_PUSH, (const int32_t *) seg_addr(cmd->words.w1)));
 #else
                 gfx_sp_matrix(C0(16, 8), (const int32_t *) seg_addr(cmd->words.w1));
 #endif
@@ -1857,7 +1870,9 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
                 break;
             case G_VTX:
 #ifdef F3DEX_GBI_2
-                gfx_sp_vertex(C0(12, 8), C0(1, 7) - C0(12, 8), seg_addr(cmd->words.w1), true);
+                GFX_PERF_COUNT(VITA_PERF_VTX_CALLS, 1);
+                GFX_PERF_COUNT(VITA_PERF_VTX_COUNT, C0(12, 8));
+                GFX_PERF_SAMPLED(VITA_PERF_VTX_TIME, gfx_sp_vertex(C0(12, 8), C0(1, 7) - C0(12, 8), seg_addr(cmd->words.w1), true));
 #elif defined(F3DEX_GBI) || defined(F3DLP_GBI)
                 gfx_sp_vertex(C0(10, 6), C0(16, 8) / 2, seg_addr(cmd->words.w1), true);
 #else
@@ -1889,7 +1904,8 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
 #endif
             case (uint8_t)G_TRI1:
 #ifdef F3DEX_GBI_2
-                gfx_sp_tri1(C0(16, 8) / 2, C0(8, 8) / 2, C0(0, 8) / 2);
+                GFX_PERF_COUNT(VITA_PERF_TRI_CALLS, 1);
+                GFX_PERF_SAMPLED(VITA_PERF_TRI_TIME, gfx_sp_tri1(C0(16, 8) / 2, C0(8, 8) / 2, C0(0, 8) / 2));
 #elif defined(F3DEX_GBI) || defined(F3DLP_GBI)
                 gfx_sp_tri1(C1(16, 8) / 2, C1(8, 8) / 2, C1(0, 8) / 2);
 #else
@@ -1898,8 +1914,11 @@ static void OPTIMIZE_O3 gfx_run_dl(Gfx* cmd) {
                 break;
 #if defined(F3DEX_GBI) || defined(F3DLP_GBI)
             case (uint8_t)G_TRI2:
-                gfx_sp_tri1(C0(16, 8) / 2, C0(8, 8) / 2, C0(0, 8) / 2);
-                gfx_sp_tri1(C1(16, 8) / 2, C1(8, 8) / 2, C1(0, 8) / 2);
+                GFX_PERF_COUNT(VITA_PERF_TRI_CALLS, 2);
+                GFX_PERF_SAMPLED(VITA_PERF_TRI_TIME, {
+                    gfx_sp_tri1(C0(16, 8) / 2, C0(8, 8) / 2, C0(0, 8) / 2);
+                    gfx_sp_tri1(C1(16, 8) / 2, C1(8, 8) / 2, C1(0, 8) / 2);
+                });
                 break;
 #endif
             case (uint8_t)G_SETOTHERMODE_L:
@@ -2084,7 +2103,7 @@ void gfx_start_frame(void) {
         rdp.loaded_texture[1].addr = NULL;
         rdp.loaded_texture[1].size_bytes = 0;
     }
-    gfx_wapi->handle_events();
+    GFX_PERF(VITA_PERF_EVENTS, gfx_wapi->handle_events());
     gfx_wapi->get_dimensions(&gfx_current_dimensions.width, &gfx_current_dimensions.height);
     if (gfx_current_dimensions.height == 0) {
         // Avoid division by zero

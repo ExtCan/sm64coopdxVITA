@@ -70,6 +70,18 @@
 
 #include <SDL2/SDL.h>
 
+#ifdef TARGET_VITA
+#include "pc/vita/vita_platform.h"
+extern struct GfxRenderingAPI gfx_vitagl_api;
+extern struct AudioAPI audio_vita;
+// time a piece of the frame for the statistics in the log, see vita_update()
+#define VITA_PERF(section, code) { unsigned long long _vitaPerfStart = vita_perf_now(); code; vita_perf_add(section, vita_perf_now() - _vitaPerfStart); }
+#define VITA_PERF_COUNT(section) vita_perf_add(section, 1)
+#else
+#define VITA_PERF(section, code) { code; }
+#define VITA_PERF_COUNT(section)
+#endif
+
 extern Vp gViewportFullscreen;
 
 OSMesg D_80339BEC;
@@ -221,6 +233,22 @@ static void select_graphics_backend(void) {
         return;
     }
 
+#if defined(TARGET_VITA)
+    // SDL2 window (on top of vitaGL), vitaGL renderer with Cg shaders, native audio output
+    gWindowApi = &gfx_sdl;
+    gRenderApi = &gfx_vitagl_api;
+    gAudioApi  = &audio_vita;
+    if (!gAudioApi->init()) {
+        // fall back to SDL2's audio (BGM port), then to no audio at all
+        printf("[vita] audio: native output failed, trying SDL\n");
+        gAudioApi = &audio_sdl;
+        if (!gAudioApi->init()) {
+            gAudioApi = &audio_null;
+        }
+    }
+    return;
+#endif
+
 #if defined(_WIN32)
     if (configGraphicsBackend == GAPI_GL && !gfx_sdl_check_opengl_compatibility()) {
         configGraphicsBackend = GAPI_D3D11;
@@ -290,11 +318,14 @@ void produce_interpolation_frames_and_delay(void) {
         gFramePercentage = clamp((curTime - sFrameTimeStart) / sFrameTime, 0.f, 1.f);
         gRenderingDelta = delta;
 
-        gfx_start_frame();
-        if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); }
-        send_display_list(gGfxSPTask);
-        gfx_end_frame_render();
-        gfx_display_frame();
+        VITA_PERF(VITA_PERF_GFX, {
+            gfx_start_frame();
+            VITA_PERF(VITA_PERF_INTERP, if (!gSkipInterpolationTitleScreen) { patch_interpolations(delta); });
+            send_display_list(gGfxSPTask);
+            gfx_end_frame_render();
+        });
+        VITA_PERF(VITA_PERF_SWAP, gfx_display_frame());
+        VITA_PERF_COUNT(VITA_PERF_FRAMES);
 
         // delay if our framerate is capped
         if (shouldDelay) {
@@ -303,7 +334,7 @@ void produce_interpolation_frames_and_delay(void) {
             f64 elapsedTime = now - loopStartTime;
             f64 delay = (expectedTime - elapsedTime);
             if (delay > 0.0) {
-                precise_delay_f64(delay);
+                VITA_PERF(VITA_PERF_DELAY, precise_delay_f64(delay));
             }
         }
 
@@ -344,10 +375,33 @@ inline static void buffer_audio(void) {
         create_next_audio_buffer(sAudioBuffer + i * (numAudioSamples * 2), numAudioSamples);
     }
 
+#ifdef TARGET_VITA
+    // statistics for the heartbeat line in the log (see vita_update)
+    {
+        s32 peak = gVitaAudioStats.peak;
+        for (u32 i = 0; i < 4 * numAudioSamples; i++) {
+            s32 sample = sAudioBuffer[i];
+            if (sample < 0) { sample = -sample; }
+            if (sample > peak) { peak = sample; }
+        }
+        gVitaAudioStats.peak = peak;
+        gVitaAudioStats.buffers++;
+        gVitaAudioStats.buffered = samplesLeft;
+        gVitaAudioStats.masterVolume = gMasterVolume;
+        gVitaAudioStats.muted = shouldMute;
+        gVitaAudioStats.nullDevice = (gAudioApi == &audio_null);
+    }
+#endif
+
     if (!shouldMute) {
         for (u16 i=0; i < ARRAY_COUNT(sAudioBuffer); i++) {
             sAudioBuffer[i] *= gMasterVolume;
         }
+#ifdef TARGET_VITA
+        // mod audio (miniaudio) has no output device of its own on the Vita
+        extern void smlua_audio_custom_mix(s16 *buffer, u32 numFrames);
+        smlua_audio_custom_mix(sAudioBuffer, 2 * numAudioSamples);
+#endif
         gAudioApi->play((u8 *)sAudioBuffer, 2 * numAudioSamples * 4);
     }
 }
@@ -380,17 +434,19 @@ void *audio_thread(UNUSED void *arg) {
 }
 
 void produce_one_frame(void) {
-    CTX_EXTENT(CTX_NETWORK, network_update);
+    VITA_PERF_COUNT(VITA_PERF_TICKS);
+
+    VITA_PERF(VITA_PERF_NETWORK, CTX_EXTENT(CTX_NETWORK, network_update));
 
     CTX_EXTENT(CTX_INTERP, patch_interpolations_before);
 
-    CTX_EXTENT(CTX_GAME_LOOP, game_loop_one_iteration);
+    VITA_PERF(VITA_PERF_GAME, CTX_EXTENT(CTX_GAME_LOOP, game_loop_one_iteration));
 
-    CTX_EXTENT(CTX_SMLUA, smlua_update);
+    VITA_PERF(VITA_PERF_LUA, CTX_EXTENT(CTX_SMLUA, smlua_update));
 
     // If we aren't threaded
     if (gAudioThread.state == INVALID) {
-        CTX_EXTENT(CTX_AUDIO, buffer_audio);
+        VITA_PERF(VITA_PERF_AUDIO, CTX_EXTENT(CTX_AUDIO, buffer_audio));
     }
 
     CTX_EXTENT(CTX_RENDER, produce_interpolation_frames_and_delay);
@@ -501,8 +557,23 @@ void* main_game_init(UNUSED void* dummy) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef TARGET_VITA
+    // clocks, system modules, network, user folder and log file
+    vita_init();
+    // there is no command line on the Vita
+    argc = 0;
+#endif
+
     // handle terminal arguments
     if (!parse_cli_opts(argc, argv)) { return 0; }
+
+#ifdef TARGET_VITA
+    // debugging aid: start hosting a game right away, as "--server 7777" would on a PC
+    if (vita_debug_autohost()) {
+        gCLIOpts.network = NT_SERVER;
+        gCLIOpts.networkPort = 7777;
+    }
+#endif
 
 #ifdef _WIN32
     // handle Windows console

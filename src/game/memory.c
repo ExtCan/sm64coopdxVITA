@@ -8,6 +8,11 @@
 // Alignment to a data size
 #define ALIGN_UP(val, align) (((val) + ((align) - 1)) & ~((align) - 1))
 
+// Alignment of everything the pools hand out. Display list commands, matrices, lights and
+// vertices contain 64-bit members, so they need 8 byte alignment even where pointers are only
+// 4 bytes wide: on 32-bit ARM the compiler emits NEON loads/stores that fault on anything less.
+#define POOL_ALIGNMENT ((sizeof(void*) > 8) ? sizeof(void*) : 8)
+
   //////////////////
  // dynamic pool //
 //////////////////
@@ -26,7 +31,7 @@ struct DynamicPool* dynamic_pool_init(void) {
 void* dynamic_pool_alloc(struct DynamicPool *pool, u32 size) {
     if (!pool) { return NULL; }
 
-    size_t header = ALIGN_UP(sizeof(struct DynamicPoolNode), sizeof(void*));
+    size_t header = ALIGN_UP(sizeof(struct DynamicPoolNode), POOL_ALIGNMENT);
     struct DynamicPoolNode* node = malloc(header + size);
     if (!node) { return NULL; }
     node->ptr = (u8*)node + header;
@@ -123,12 +128,12 @@ void* growing_pool_alloc(struct GrowingPool *pool, u32 size) {
     if (!pool) { return NULL; }
 
     // maintain alignment
-    size = ALIGN_UP(size, sizeof(void*));
+    size = ALIGN_UP(size, POOL_ALIGNMENT);
 
     // check if it's too big for a node
     if (size >= pool->nodeSize) {
         // create a node just for this
-        size_t header = ALIGN_UP(sizeof(struct GrowingPoolNode), sizeof(void*));
+        size_t header = ALIGN_UP(sizeof(struct GrowingPoolNode), POOL_ALIGNMENT);
         struct GrowingPoolNode* node = malloc(header + size);
         if (!node) { return NULL; }
         node->ptr = (u8*) node + header;
@@ -160,7 +165,7 @@ void* growing_pool_alloc(struct GrowingPool *pool, u32 size) {
 
     // allocate new node
     if (!node) {
-        size_t header = ALIGN_UP(sizeof(struct GrowingPoolNode), sizeof(void*));
+        size_t header = ALIGN_UP(sizeof(struct GrowingPoolNode), POOL_ALIGNMENT);
         node = malloc(header + pool->nodeSize);
         if (!node) { return NULL; }
         node->usedSpace = 0;

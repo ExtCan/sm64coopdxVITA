@@ -69,6 +69,12 @@ f32 round_to_multiple_f(f32 value, f32 multiple) {
 
 f32 djui_gfx_get_scale(void) {
     if (configDjuiScale == 0) { // auto
+#ifdef TARGET_VITA
+        // The regular formula picks x0.5 for the Vita's 544 lines, which is unreadable on a
+        // 5 inch screen, and x1.0 no longer fits the menus. x0.7 gives the menus a virtual
+        // height of 777 pixels, a little more than the 720 they are laid out for.
+        return 0.7f;
+#endif
         u32 windowWidth, windowHeight;
         gfx_get_dimensions(&windowWidth, &windowHeight);
         return clamp(round_to_multiple_f(((f32)windowHeight / (f32)SCREEN_HEIGHT) / 4.0f, 0.5f), 0.5f, 1.5f);

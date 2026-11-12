@@ -1,3 +1,78 @@
+#ifdef TARGET_VITA
+
+// PS Vita: std::filesystem is avoided here (no symlinks/realpath on the Vita's devices),
+// the ROM is simply looked up in the user folder with plain POSIX calls and used in place.
+
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
+
+extern "C" {
+#include "platform.h"
+#include "mods/mods_utils.h" // for path_ends_with
+#include "mods/mod_cache.h"  // for md5 hashing
+#include "mods/mods.h"
+#include "loading.h"
+#include "fs/fs.h"
+#include "vita/vita_platform.h"
+}
+
+bool gRomIsValid = false;
+char gRomFilename[SYS_MAX_PATH] = "";
+
+// vanilla US rom
+static const u8 sVanillaUsMD5[16] = {
+    0x20, 0xb8, 0x54, 0xb2, 0x39, 0x20, 0x3b, 0xaf, 0x6c, 0x96, 0x1b, 0x85, 0x0a, 0x4a, 0x51, 0xa2,
+};
+
+static bool is_rom_valid(const char *romPath) {
+    u8 dataHash[16] = { 0 };
+    mod_cache_md5(romPath, dataHash);
+    if (memcmp(dataHash, sVanillaUsMD5, sizeof(dataHash)) != 0) {
+        printf("[vita] '%s' is not a vanilla US rom\n", romPath);
+        return false;
+    }
+
+    printf("[vita] using rom '%s'\n", romPath);
+    snprintf(gRomFilename, SYS_MAX_PATH, "%s", romPath);
+    gRomIsValid = true;
+    return true;
+}
+
+static bool scan_path_for_rom(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) { return false; }
+
+    bool found = false;
+    struct dirent *ent;
+    while (!found && (ent = readdir(d)) != NULL) {
+        if (!path_ends_with(ent->d_name, ".z64")) { continue; }
+        char path[SYS_MAX_PATH];
+        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        found = is_rom_valid(path);
+    }
+
+    closedir(d);
+    return found;
+}
+
+extern "C" {
+void legacy_folder_handler(void) {
+}
+
+bool main_rom_handler(void) {
+    if (scan_path_for_rom(VITA_USER_PATH)) { return true; }
+    if (scan_path_for_rom("ux0:data")) { return true; }
+    return gRomIsValid;
+}
+
+void rom_on_drop_file(const char *path) {
+    if (path && path[0]) { is_rom_valid(path); }
+}
+}
+
+#else // !TARGET_VITA
+
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -107,3 +182,5 @@ void rom_on_drop_file(const char *path) {
     }
 }
 }
+
+#endif // TARGET_VITA

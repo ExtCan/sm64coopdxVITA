@@ -180,6 +180,17 @@ struct AdsrEnvelope {
     s16 arg;
 }; // size = 0x4
 
+// The prebuilt sound bank data (sound/sound_data_compressed.ctl) was generated for 64-bit
+// little endian machines: every pointer in it is an 8 byte slot with 8 byte alignment.
+// AUDIO_FILE_PTR declares a pointer member of a struct that is mapped directly onto that data.
+// On the 32-bit PS Vita the pointer is padded to 8 bytes so that the structs keep the exact
+// layout of the file (the pointer itself lives in the low half of the slot).
+#ifdef TARGET_VITA
+#define AUDIO_FILE_PTR(type, name) union { type name; u64 name##_slot64; }
+#else
+#define AUDIO_FILE_PTR(type, name) type name
+#endif
+
 struct AdpcmLoop
 {
     u32 start;
@@ -208,9 +219,9 @@ struct AudioBankSample
     u8 unused;
     u8 loaded;
 #endif
-    u8 *sampleAddr;
-    struct AdpcmLoop *loop;
-    struct AdpcmBook *book;
+    AUDIO_FILE_PTR(u8 *, sampleAddr);
+    AUDIO_FILE_PTR(struct AdpcmLoop *, loop);
+    AUDIO_FILE_PTR(struct AdpcmBook *, book);
 #ifndef VERSION_SH
     u32 sampleSize; // never read. either 0 or 1 mod 9, depending on padding
 #endif
@@ -218,7 +229,7 @@ struct AudioBankSample
 
 struct AudioBankSound
 {
-    struct AudioBankSample *sample;
+    AUDIO_FILE_PTR(struct AudioBankSample *, sample);
     f32 tuning; // frequency scale factor
 }; // size = 0x8
 
@@ -228,7 +239,7 @@ struct Instrument
     /*0x01*/ u8 normalRangeLo;
     /*0x02*/ u8 normalRangeHi;
     /*0x03*/ u8 releaseRate;
-    /*0x04*/ struct AdsrEnvelope *envelope;
+    /*0x04*/ AUDIO_FILE_PTR(struct AdsrEnvelope *, envelope);
     /*0x08*/ struct AudioBankSound lowNotesSound;
     /*0x10*/ struct AudioBankSound normalNotesSound;
     /*0x18*/ struct AudioBankSound highNotesSound;
@@ -240,12 +251,14 @@ struct Drum
     u8 pan;
     u8 loaded;
     struct AudioBankSound sound;
-    struct AdsrEnvelope *envelope;
+    AUDIO_FILE_PTR(struct AdsrEnvelope *, envelope);
 };
 
 struct AudioBank
 {
-    struct Drum **drums;
+    AUDIO_FILE_PTR(struct Drum **, drums);
+    // On the Vita the file has 8 byte slots here as well, patch_audio_bank()
+    // compacts them into regular 4 byte pointers when the bank is loaded.
     struct Instrument *instruments[1];
 }; // dynamic size
 

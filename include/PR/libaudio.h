@@ -5,7 +5,13 @@
 
 typedef struct
 {
+#ifdef TARGET_VITA
+    // The prebuilt sound data (sound/*_compressed.*) is laid out for 64-bit pointers.
+    // Keep that layout on the 32-bit Vita: the pointer lives in the low half of an 8 byte slot.
+    union { u8 *offset; u64 offset64; };
+#else
     u8 *offset;
+#endif
     s32 len;
 #ifdef VERSION_SH
     s8 magic[2]; // tbl: 0x0204, otherwise: 0x0203

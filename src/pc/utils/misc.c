@@ -2,7 +2,9 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#ifndef TARGET_VITA
 #include <sys/wait.h>
+#endif
 #endif
 
 #include <stdio.h>
@@ -715,6 +717,9 @@ void update_game(void) {
         CloseHandle(pi.hThread);
     }
     exit(0);
+#elif defined(TARGET_VITA)
+    // no updater on the Vita
+    (void) updateExecFilePath;
 #else
     fclose(stdin);
     fclose(stdout);

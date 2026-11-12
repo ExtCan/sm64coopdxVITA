@@ -186,17 +186,58 @@ u8 smlua_audio_utils_allocate_sequence(void) {
 #define MA_SOUND_SAMPLE_FLAGS (MA_SOUND_FLAG_NO_SPATIALIZATION | MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_DECODE) // No pitch, pre-decode audio samples
 
 static ma_engine sModAudioEngine;
+#ifdef TARGET_VITA
+static bool sModAudioEngineReady = false;
+#endif
 static struct DynamicPool *sModAudioPool;
 static bool sModAudioShuttingDown = false;
 
 static void smlua_audio_custom_init(void) {
     sModAudioPool = dynamic_pool_init();
 
+#ifdef TARGET_VITA
+    // miniaudio has no Vita playback backend. The engine runs without a device instead and
+    // gets mixed into the game's own audio stream, see smlua_audio_custom_mix()
+    ma_engine_config config = ma_engine_config_init();
+    config.noDevice = MA_TRUE;
+    config.channels = 2;
+    config.sampleRate = 32000;
+    ma_result result = ma_engine_init(&config, &sModAudioEngine);
+#else
     ma_result result = ma_engine_init(NULL, &sModAudioEngine);
+#endif
     if (result != MA_SUCCESS) {
         LOG_ERROR("failed to init Miniaudio: %d", result);
     }
+#ifdef TARGET_VITA
+    sModAudioEngineReady = (result == MA_SUCCESS);
+#endif
 }
+
+#ifdef TARGET_VITA
+// Mixes `numFrames` frames of mod audio (streams and samples) into an interleaved stereo s16 buffer
+void smlua_audio_custom_mix(s16 *buffer, u32 numFrames) {
+    static float sMixBuffer[1024 * 2];
+    if (!sModAudioPool || !sModAudioEngineReady || sModAudioShuttingDown) { return; }
+
+    while (numFrames > 0) {
+        u32 frames = (numFrames > 1024) ? 1024 : numFrames;
+        ma_uint64 framesRead = 0;
+        if (ma_engine_read_pcm_frames(&sModAudioEngine, sMixBuffer, frames, &framesRead) != MA_SUCCESS) { return; }
+        if (framesRead == 0) { return; }
+
+        for (u32 i = 0; i < (u32)framesRead * 2; i++) {
+            s32 sample = (s32)buffer[i] + (s32)(sMixBuffer[i] * 32767.0f);
+            if (sample > 32767) { sample = 32767; }
+            if (sample < -32768) { sample = -32768; }
+            buffer[i] = (s16)sample;
+        }
+
+        buffer += framesRead * 2;
+        numFrames -= (u32)framesRead;
+    }
+}
+#endif
 
 static struct ModAudio* find_mod_audio(const char *filepath) {
     struct DynamicPoolNode* node = sModAudioPool->tail;
@@ -846,6 +887,9 @@ void smlua_audio_custom_deinit(void) {
         sModAudioShuttingDown = true;
         pthread_mutex_unlock(&sSampleCopyMutex);
 
+#ifdef TARGET_VITA
+        sModAudioEngineReady = false;
+#endif
         ma_engine_uninit(&sModAudioEngine);
 
         audio_custom_shutdown();
